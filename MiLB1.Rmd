@@ -1,0 +1,264 @@
+---
+title: "Untitled"
+author: "Alex Eisert"
+date: "5/26/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(rvest)
+library(dplyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(RSelenium)
+library(xlsx)
+library(ggthemes)
+```
+
+```{r}
+##International League
+url <- 'https://www.baseball-reference.com/register/league.cgi?code=IL&class=AAA'
+
+webpage <- read_html(url)
+
+g <- html_table(webpage)
+df <- bind_rows(g)
+df$Classification <- ifelse(is.na(df$Classification), "AAA", df$Classification)
+
+df$NumTmsIL <- str_count(df$Tm, ',') + 1
+
+AAA_IL <- df %>% filter(Classification=="AAA")
+
+##Pacific Coast League
+
+url1 <- 'https://www.baseball-reference.com/register/league.cgi?code=PCL&class=AAA'
+g1 <- html_table(read_html(url1))
+df1 <- bind_rows(g1)
+df1 <- df1[order(-df1$Year),]
+df1$Classification <- ifelse(is.na(df1$Classification), "AAA", df1$Classification)
+
+df1$NumTmsPCL <- str_count(df1$Tm, ',') + 1
+
+AAA_PCL <- df1 %>% filter(Classification=="AAA")
+
+##American Association
+
+url2 <- 'https://www.baseball-reference.com/register/league.cgi?code=AA&class=AAA'
+g2 <- html_table(read_html(url2))
+df2 <- bind_rows(g2)
+df2 <- df2[order(-df2$Year),]
+df2$Classification <- ifelse(is.na(df2$Classification), "AAA", df2$Classification)
+df2$NumTmsAmerA <- str_count(df2$Tm, ',') + 1
+
+AAA_AA <- df2 %>% filter(Classification=="AAA")
+
+##MLB teams
+
+url_base <- 'https://www.baseball-reference.com/leagues/MLB/'
+
+urls <- paste0(url_base, 1946:2019)
+urls <- paste0(urls, '-standings.shtml')
+
+url_base <- 'http://www.thebaseballcube.com/mlb/seasons/review.asp?Y='
+
+urlss <- paste0(url_base, 1946:1968)
+
+num.tms2 <- function(url){
+  webpage <- read_html(url)
+  
+  tables <- html_table(webpage)
+  
+  df <- as.data.frame(tables[1])
+  
+  df <- df %>%
+    filter(grepl("\\d", X2)==TRUE & grepl("record", X2)==FALSE)
+         
+  return(nrow(df))
+}
+
+webpage <- read_html("http://www.thebaseballcube.com/mlb/seasons/review.asp?Y=1946")
+
+tables <- html_table(webpage)
+
+guh <- as.data.frame(tables[1])
+
+guh %>%
+  filter(grepl("\\d", X2)==TRUE & grepl("record", X2)==FALSE)
+
+pt1 <- as.data.frame(lapply(urls[24:74], num.tms1))
+
+pt1 <- as.data.frame(t(pt1))
+
+##rD <- rsDriver(browser=c("chrome"), chromever="91.0.4472.19", extraCapabilities = eCaps)
+
+##remDr <- rD$client
+
+##num.tms2 <- function(url){
+ # remDr$navigate(url)
+  #item_element <- remDr$findElements(using = 'css selector', '#expanded_standings_overall a')
+  #return(length(item_element))
+#}
+##1:23 and 24:74
+##.left , .right , .center
+
+
+
+pt2 <- as.data.frame(lapply(urlss, num.tms2))
+
+pt2 <- as.data.frame(t(pt2))
+
+full_mlb <- bind_rows(pt2, pt1)
+
+colnames(full_mlb) <- "NumTmsMLB"
+
+full_mlb$Year <- c(1946:2019)
+
+full_mlb$NumTmsMLB <- ifelse(full_mlb$NumTmsMLB==78, 26, full_mlb$NumTmsMLB)
+
+full_mlb[nrow(full_mlb) + 1,] = c(30, 2020)
+
+full_mlb <- full_mlb[order(-full_mlb$Year),]
+
+##Combining the datasets
+df.full <- full_join(full_mlb, AAA_IL, by = "Year")
+df.full <- df.full[c(2,1,5)]
+df.full <- full_join(df.full, AAA_PCL, by = "Year")
+df.full <- df.full[c(1,2,3,6)]
+df.full <- full_join(df.full, AAA_AA, by = "Year")
+df.full <- df.full[c(1,2,3,4,7)]
+df.full$NumTmsAAA <- ifelse(is.na(df.full$NumTmsAmerA), df.full$NumTmsIL + df.full$NumTmsPCL,
+                            ifelse(is.na(df.full$NumTmsPCL), df.full$NumTmsAmerA + df.full$NumTmsIL, 
+                                         df.full$NumTmsAmerA + df.full$NumTmsIL + df.full$NumTmsPCL))
+df.full
+
+##write_excel_csv(df.full, path = "AAA.csv")
+##write.xlsx(df.full, file = "AAA.xlsx")
+
+df.full
+```
+
+```{r}
+##AA
+##Eastern League
+
+url <- 'https://www.baseball-reference.com/register/league.cgi?code=EL&class=AA'
+
+webpage <- read_html(url)
+
+g <- html_table(webpage)
+df <- bind_rows(g)
+
+df$Classification <- ifelse(is.na(df$Classification), "AA", df$Classification)
+
+df$NumTmsEL <- str_count(df$Tm, ',') + 1
+
+AA_EL <- df %>% filter(Classification=="AA")
+
+##Southern League
+
+url1 <- 'https://www.baseball-reference.com/register/league.cgi?code=SOUL&class=AA'
+
+webpage1 <- read_html(url1)
+
+g1 <- html_table(webpage1)
+
+url1.2 <- 'https://www.baseball-reference.com/register/league.cgi?code=SALL&class=A'
+
+webpage1.2 <- read_html(url1.2)
+
+g1.2 <- html_table(webpage1.2)
+
+df1 <- bind_rows(g1[1], g1.2[2])
+
+g1.3 <- as.data.frame(g1.2[1])
+
+df1 <- bind_rows(df1, g1.3[c(42:58),])
+
+df1 <- df1[order(-df1$Year),]
+
+df1$Classification <- ifelse(is.na(df1$Classification) & df1$Year>1963, "AA", 
+                             ifelse(is.na(df1$Classification) & df1$Year<1963, "A",
+                                    df1$Classification))
+
+df1$NumTmsSL <- str_count(df1$Tm, ',') + 1
+
+AA_SL <- df1 %>% filter(Classification=="AA")
+
+##Texas League
+
+url2 <- 'https://www.baseball-reference.com/register/league.cgi?code=TL&class=AA'
+
+webpage2 <- read_html(url2)
+
+g2 <- html_table(webpage2)
+df2 <- bind_rows(g2)
+
+df2$Classification <- ifelse(is.na(df2$Classification), "AA", df2$Classification)
+
+df2$NumTmsTL <- str_count(df2$Tm, ',') + 1
+
+AA_TL <- df2 %>% filter(Classification=="AA")
+
+##Southern Association
+
+url3 <- 'https://www.baseball-reference.com/register/league.cgi?code=SOUA&class=AA'
+
+webpage3 <- read_html(url3)
+
+g3 <- html_table(webpage3)
+df3 <- bind_rows(g3)
+
+df3$Classification <- ifelse(is.na(df3$Classification), "AA", df3$Classification)
+
+df3$NumTmsSA <- str_count(df3$Tm, ',') + 1
+
+AA_SA <- df3 %>% filter(Classification=="AA")
+
+##Dixie Association
+url4 <- 'https://www.baseball-reference.com/register/league.cgi?code=DIXA&class=AA'
+
+webpage4 <- read_html(url4)
+g4 <- html_table(webpage4)
+df4 <- as.data.frame(g4)
+df4$Classification <- "AA"
+df4$NumTmsDA <- str_count(df4$Tm, ',') + 1
+
+##Full AA
+df.fullAA <- full_join(full_mlb, AA_EL, by = "Year")
+df.fullAA <- df.fullAA[c(1,2,5)]
+df.fullAA <- full_join(df.fullAA, AA_SL, by = "Year")
+df.fullAA <- df.fullAA[c(1,2,3,6)]
+df.fullAA <- full_join(df.fullAA, AA_TL, by = "Year")
+df.fullAA <- df.fullAA[c(1,2,3,4,7)]
+df.fullAA <- full_join(df.fullAA, AA_SA, by = "Year")
+df.fullAA <- df.fullAA[c(1,2,3,4,5,8)]
+df.fullAA <- full_join(df.fullAA, df4, by = "Year")
+
+df.fullAA <- df.fullAA[c(1,2,3,4,5,6,9)]
+df.fullAA$NumTmsDA <- ifelse(is.na(df.fullAA$NumTmsDA), 0, df.fullAA$NumTmsDA)
+df.fullAA$NumTmsEL <- ifelse(is.na(df.fullAA$NumTmsEL), 0, df.fullAA$NumTmsEL)
+df.fullAA$NumTmsSL <- ifelse(is.na(df.fullAA$NumTmsSL), 0, df.fullAA$NumTmsSL)
+df.fullAA$NumTmsTL <- ifelse(is.na(df.fullAA$NumTmsTL), 0, df.fullAA$NumTmsTL)
+df.fullAA$NumTmsSA <- ifelse(is.na(df.fullAA$NumTmsSA), 0, df.fullAA$NumTmsSA)
+df.fullAA$NumTmsAA <- df.fullAA$NumTmsEL + df.fullAA$NumTmsSL + df.fullAA$NumTmsTL + df.fullAA$NumTmsSA + df.fullAA$NumTmsDA
+
+df.fullAA <- df.fullAA[c(2,1,3,4,5,6,7,8)]
+
+
+##write.csv(df.fullAA, file = "AAtotal.csv")
+
+df.full <- df.full[-1,]
+df.fullAA <- df.fullAA[-1,]
+df.full$NumTmsAA <- df.fullAA$NumTmsAA
+df.full <- df.full[c(1,2,6,7)]
+```
+
+```{r}
+ggplot() + geom_line(data = df.full, aes(x = Year, y = NumTmsMLB, color = "MLB"), size = 1.25) + geom_line(data = df.full, aes(x = Year, y = NumTmsAAA, color = "AAA"), size = 1.25) + geom_line(data = df.fullAA, aes(x = Year, y = NumTmsAA, color = "AA"), size = 1.25) + theme_bw() + theme_stata(scheme = "s1mono") + theme(axis.title.x = element_text(size=15), axis.title.y = element_text(size=15), axis.line = element_line(size = 0.3), axis.text = element_text(size=15), legend.text = element_text(size=15), legend.title = element_text(size=15), plot.title = element_text(hjust = 0.5, size=25), legend.key.size = unit(2, "line"), panel.background = element_blank(), legend.position = c(0.9, 0.3)) + scale_x_continuous(breaks = seq(1946, 2019, by = 5), expand = c(0,0)) + scale_y_continuous(breaks = seq(0, 40, by = 5), expand = c(0,0), limits = c(0, 40)) + scale_color_manual(values = c("MLB" = "red",
+  "AAA" = "blue", "AA" = "darkgreen")) + labs(color = "Class") + ylab("Number of Teams")
+
+ggsave("Tms.jpg", width = 10, height = 5)
+```
+

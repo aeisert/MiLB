@@ -1,0 +1,874 @@
+---
+title: "MiLB2"
+author: "Alex Eisert"
+date: "5/31/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(rvest)
+library(dplyr)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(RSelenium)
+library(XML)
+library(RCurl)
+library(stringi)
+library(qdap)
+library(tidyr)
+library(rlist)
+library(xlsx)
+library(ggthemes)
+```
+
+```{r}
+##Reading in team-level stats for each minor league for each year
+
+urlbase <- "https://www.baseball-reference.com/register/league.cgi?group=Minors&year="
+urls <- paste(urlbase, 1946:2019, sep = "")
+
+# READ URL TEXT
+urltxt <- readLines(urls[1])
+# REMOVE COMMENT TAGS
+urltxt <- gsub("-->", "", gsub("<!--", "", urltxt))
+
+# PARSE UNCOMMENTED TEXT
+doc <- htmlParse(urltxt)
+
+# RETRIEVE ALL <table> TAGS
+tables <- xpathApply(doc, "//table")
+
+# LIST OF DATAFRAMES
+teamPageTables <- lapply(tables[c(1:4)], function(i) readHTMLTable(i))
+
+read.all.tables <- function(url){
+  urltxt <- readLines(url)
+  urltxt <- gsub("-->", "", gsub("<!--", "", urltxt))
+  doc <- htmlParse(urltxt)
+  tables <- xpathApply(doc, "//table")
+  alltables <- lapply(tables, function(i) readHTMLTable(i))
+  return(alltables)
+}
+
+read.second.table <- function(url){
+  urltxt <- readLines(url)
+  urltxt <- gsub("-->", "", gsub("<!--", "", urltxt))
+  doc <- htmlParse(urltxt)
+  tables <- xpathApply(doc, "//table")
+  alltables <- lapply(tables, function(i) readHTMLTable(i))
+  return(alltables[[2]])
+}
+teamPageTables[[2]]
+
+all.league.links[[1]]
+
+```
+
+```{r}
+league.links <- function(url){
+  
+doc <- htmlTreeParse(getURL(url), useInternalNodes = TRUE)
+d <- xpathSApply(doc, "//a[@href]")
+htmltxt <- capture.output(d, file=NULL)
+str_extract_all(htmltxt, "league.cgi\\?id\\=")
+dd <- as.data.frame(htmltxt)
+
+dd <- dd %>% dplyr::filter(grepl("league.cgi\\?id\\=", htmltxt)==TRUE)
+
+dd$htmltxt <- genXtract(dd$htmltxt, "\"", "\"")
+
+df1 <- as.data.frame(t(as.data.frame(dd[[1]])))
+
+df <- as.data.frame(html_table(read_html(url)))
+df <- df %>% filter(!is.na(Rk))
+
+df1$Lg <- df$Lg
+
+df1$Year <- substr(url, nchar(url)-3, nchar(url))
+
+return(df1)
+}
+
+team.links <- function(url) {
+
+html <- paste(readLines(url), collapse="\n")
+matched <- str_match_all(html, "<a href=\"(.*?)\"")
+dd <- as.data.frame(matched)
+dd <- dd %>% dplyr::filter(grepl("team.cgi\\?id\\=", X2)==TRUE)
+dd <- distinct(dd)
+dd <- dd[c(2)]
+d <- as.data.frame(read.all.tables(url)[[1]])
+colnames(d)[1] <- "Tm"
+d <- d %>% dplyr::filter(!grepl("division", Tm, ignore.case = TRUE))
+dd$Tm <- d$Tm
+dd$Aff <- d$Aff
+colnames(dd)[1] <- "Link"
+dd$Link <- paste(urlbase2, dd$Link, sep = "")
+return(dd)
+
+}
+
+all.league.links <- lapply(urls, league.links)
+IL.team.links <- lapply(all.IL.links, team.links)
+
+for(i in 1:74){
+  IL.team.links[[i]]$Year <- IL.years[i]
+}
+
+
+
+spec.links <- function(df, name){
+  df <- df %>% filter(Lg==name)
+  return(df)
+}
+
+spec.team.links <- function(df, name){
+  df <- df %>% filter(Tm==name)
+  return(df)
+}
+
+all.IL.links <- lapply(all.league.links, spec.links, name="International League")
+all.IL.links <- bind_rows(all.IL.links)
+all.IL.links <- paste(urlbase2, all.IL.links$V1, sep = "")
+all.IL.tables <- lapply(all.IL.links, read.all.tables)
+IL.years <- c(1946:2019)
+IL.years <- as.data.frame(IL.years)
+IL.standings <- lapply(all.IL.tables, function(x) x[[1]])
+IL.standings <- lapply(IL.standings, remove.eastern)
+for(i in 1:74){
+  IL.fielding[[i]] <- amer.assoc.yr(IL.fielding[[i]], IL.years[i,])
+}
+IL.standings <- bind_rows(IL.standings)
+IL.standings <- IL.standings %>% filter(W!="W")
+
+IL.batting <- lapply(all.IL.tables, batting)
+IL.batting <- bind_rows(IL.batting)
+IL.batting
+all.IL.tables[[1]][[6]]
+
+IL.pitching <- lapply(all.IL.tables, pitching)
+IL.pitching <- bind_rows(IL.pitching)
+IL.pitching
+
+IL.fielding <- lapply(all.IL.tables, fielding)
+IL.fielding <- bind_rows(IL.fielding)
+IL.fielding <- IL.fielding[-c(15)]
+
+
+
+all.amer.a.links <- lapply(all.league.links, spec.links, name="American Association")
+
+all.amer.a.links <- bind_rows(all.amer.a.links)
+
+urlbase2 <- "https://www.baseball-reference.com"
+all.amer.a.links2 <- paste(urlbase2, all.amer.a.links$V1, sep = "")
+
+all.amer.a.tables <- lapply(all.amer.a.links2, read.all.tables)
+
+length(all.amer.a.tables)
+
+##get rid of 2 and 3 for a sixer or 2 for a fiver
+
+amer.assoc.standings <- sapply(all.amer.a.tables, function(x) x[[1]])
+
+amer.assoc.standings
+
+##df <- df %>% filter(df$Tm!="West Division")
+
+remove.eastern <- function(df){
+  colnames(df)[[1]] <- "Tm"
+  return(df)
+}
+
+amer.assoc.standings <- lapply(amer.assoc.standings, remove.eastern)
+
+amer.assoc.standings
+
+all.amer.a.tables
+
+##hitting, pitching, fielding, after standings
+
+batting <- function(x){
+  ifelse(length(x)==6, return(x[[4]]),
+         ifelse(length(x)==5, return(x[[3]]),
+                return(x[[2]])))
+}
+
+batting.sa <- function(x){
+  ifelse(length(x)==5 | length(x)==6, return(x[[4]]),
+         return(x[[2]]))
+}
+
+pitching <- function(x){
+  ifelse(length(x)==6, return(x[[5]]),
+         ifelse(length(x)==5, return(x[[4]]),
+                return(x[[3]])))
+}
+
+pitching.sa <- function(x){
+  ifelse(length(x)==5 | length(x)==6, return(x[[5]]),
+         return(x[[3]]))
+}
+
+fielding <- function(x){
+  ifelse(length(x)==6, return(x[[6]]),
+         ifelse(length(x)==5, return(x[[5]]),
+                return(x[[4]])))
+}
+
+fielding.sa <- function(x){
+  ifelse(length(x)==6, return(x[[6]]),
+         ifelse(length(x)==4, return(x[[4]]),
+                return(data.frame(matrix(ncol=1, nrow=1)))))
+}
+
+amer.assoc.batting <- lapply(all.amer.a.tables, batting)
+
+amer.assoc.pitching <- lapply(all.amer.a.tables, pitching)
+
+amer.assoc.fielding <- lapply(all.amer.a.tables, fielding)
+
+amer.assoc.years <- c(1946:1962, 1969:1997)
+amer.assoc.years <- as.data.frame(amer.assoc.years)
+
+amer.assoc.yr <- function(df, vector){
+  df$Year <- vector
+  return(df)
+}
+
+for(i in 1:46){
+  amer.assoc.batting[[i]] <- amer.assoc.yr(amer.assoc.batting[[i]], amer.assoc.years[i,])
+}
+
+for(i in 1:46){
+  amer.assoc.standings[[i]] <- amer.assoc.yr(amer.assoc.standings[[i]], amer.assoc.years[i,])
+}
+
+for(i in 1:46){
+  amer.assoc.pitching[[i]] <- amer.assoc.yr(amer.assoc.pitching[[i]], amer.assoc.years[i,])
+}
+
+for(i in 1:46){
+  amer.assoc.fielding[[i]] <- amer.assoc.yr(amer.assoc.fielding[[i]], amer.assoc.years[i,])
+}
+
+amer.assoc.batting <- bind_rows(amer.assoc.batting)
+amer.assoc.standings <- bind_rows(amer.assoc.standings)
+amer.assoc.pitching <- bind_rows(amer.assoc.pitching)
+amer.assoc.fielding <- bind_rows(amer.assoc.fielding)
+
+amer.assoc.fielding
+
+amer.assoc <- full_join(amer.assoc.standings, amer.assoc.batting, by = c("Tm", "Year"))
+amer.assoc <- amer.assoc[-c(9)]
+colnames(amer.assoc)[[2]] <- "Aff"
+amer.assoc <- full_join(amer.assoc, amer.assoc.pitching, by = c("Tm", "Year"))
+amer.assoc <- amer.assoc[-c(71)]
+amer.assoc <- full_join(amer.assoc, amer.assoc.fielding, by = c("Tm", "Year"))
+colnames(amer.assoc)[[11]] <- "G"
+colnames(amer.assoc)[[61]] <- "PO"
+amer.assoc
+amer.assoc$Attendance
+write.xlsx(amer.assoc, file = "AmerAssoc.xlsx")
+
+IL <- full_join(IL.standings, IL.batting, by = c("Tm", "Year"))
+IL <- IL[-c(9)]
+IL <- full_join(IL, IL.pitching, by = c("Tm", "Year"))
+IL <- IL[-c(37:39, 42)]
+IL <- IL[-c(34)]
+IL <- full_join(IL, IL.fielding, by = c("Tm", "Year"))
+IL <- IL[-c(61:63)]
+colnames(IL)[[2]] <- "Aff"
+colnames(IL)[[3]] <- "W"
+colnames(IL)[[4]] <- "L"
+colnames(IL)[[6]] <- "W-L%"
+colnames(IL)[[11]] <- "G"
+colnames(IL)[[61]] <- "PO"
+
+write.xlsx(IL, file = "IL.xlsx")
+```
+
+```{r}
+##PCL
+
+all.PCL.links <- lapply(all.league.links, spec.links, name="Pacific Coast League")
+all.PCL.links <- bind_rows(all.PCL.links)
+all.PCL.links <- paste(urlbase2, all.PCL.links$V1, sep = "")
+all.PCL.tables <- lapply(all.PCL.links, read.all.tables)
+PCL.years <- c(1946:2019)
+PCL.years <- as.data.frame(PCL.years)
+PCL.standings <- lapply(all.PCL.tables, function(x) x[[1]])
+for(i in 1:74){
+  PCL.fielding[[i]] <- amer.assoc.yr(PCL.fielding[[i]], PCL.years[i,])
+}
+PCL.standings <- bind_rows(PCL.standings)
+PCL.standings <- PCL.standings %>% filter(W!="W")
+
+PCL.batting <- lapply(all.PCL.tables, batting)
+PCL.batting <- lapply(PCL.batting, remove.eastern)
+PCL.batting <- bind_rows(PCL.batting)
+
+PCL.pitching <- lapply(all.PCL.tables, pitching)
+PCL.pitching <- lapply(PCL.pitching, remove.eastern)
+PCL.pitching <- bind_rows(PCL.pitching)
+
+PCL.fielding <- lapply(all.PCL.tables, fielding)
+PCL.fielding <- lapply(PCL.fielding, remove.eastern)
+PCL.fielding <- bind_rows(PCL.fielding)
+PCL.fielding <- PCL.fielding[-c(15)]
+colnames(PCL.fielding)[[5]] <- "PO"
+
+PCL <- full_join(PCL.standings, PCL.batting, by = c("Tm", "Year"))
+PCL <- PCL[-c(9)]
+PCL <- full_join(PCL, PCL.pitching, by = c("Tm", "Year"))
+PCL <- PCL[-c(37:39, 42)]
+PCL <- PCL[-c(34)]
+PCL <- full_join(PCL, PCL.fielding, by = c("Tm", "Year"))
+PCL <- PCL[-c(61:63)]
+colnames(PCL)[[2]] <- "Aff"
+colnames(PCL)[[3]] <- "W"
+colnames(PCL)[[4]] <- "L"
+colnames(PCL)[[5]] <- "W-L%"
+colnames(PCL)[[11]] <- "G"
+
+write.xlsx(PCL, file = "PCL.xlsx")
+```
+
+```{r}
+##Southern Association
+
+all.SA.links <- lapply(all.league.links, spec.links, name="Southern Association")
+all.SA.links <- bind_rows(all.SA.links)
+all.SA.links <- paste(urlbase2, all.SA.links$V1, sep = "")
+all.SA.tables <- lapply(all.SA.links, read.all.tables)
+SA.years <- c(1946:1961)
+SA.years <- as.data.frame(SA.years)
+SA.standings <- lapply(all.SA.tables, function(x) x[[1]])
+for(i in 1:16){
+  SA.fielding[[i]] <- amer.assoc.yr(SA.fielding[[i]], SA.years[i,])
+}
+SA.standings <- bind_rows(SA.standings)
+
+SA.batting <- lapply(all.SA.tables, batting.sa)
+SA.batting <- bind_rows(SA.batting)
+
+SA.pitching <- lapply(all.SA.tables, pitching.sa)
+SA.pitching <- bind_rows(SA.pitching)
+
+SA.fielding <- lapply(all.SA.tables, fielding.sa)
+SA.fielding <- bind_rows(SA.fielding)
+SA.fielding <- SA.fielding[-c(16)]
+colnames(SA.fielding)[[6]] <- "PO"
+SA.fielding <- SA.fielding %>% filter(!is.na(Tm))
+SA.fielding
+
+SA <- full_join(SA.standings, SA.batting, by = c("Tm", "Year"))
+SA <- SA[-c(9)]
+SA <- full_join(SA, SA.pitching, by = c("Tm", "Year"))
+SA <- SA[-c(37:39, 42)]
+SA <- SA[-c(35)]
+SA <- full_join(SA, SA.fielding, by = c("Tm", "Year"))
+SA <- SA[-c(61:63)]
+colnames(SA)[[2]] <- "Aff"
+colnames(SA)[[3]] <- "W"
+colnames(SA)[[4]] <- "L"
+colnames(SA)[[6]] <- "W-L%"
+colnames(SA)[[11]] <- "G"
+SA$W <- ifelse(SA$W==0, NA, SA$W)
+SA$L <- ifelse(SA$L==0, NA, SA$L)
+
+write.xlsx(SA, file = "SA.xlsx")
+
+SA
+```
+
+```{r}
+##Southern League (missing 1971 because of the Dixie Association!)
+
+all.SL.links1 <- lapply(all.league.links, spec.links, name="South Atlantic League")
+all.SL.links1 <- all.SL.links1[c(1:18)]
+all.SL.links1 <- bind_rows(all.SL.links1)
+all.SL.links2 <- lapply(all.league.links, spec.links, name="Southern League")
+all.SL.links2 <- bind_rows(all.SL.links2)
+all.SL.links <- bind_rows(all.SL.links1, all.SL.links2)
+all.SL.links <- paste(urlbase2, all.SL.links$V1, sep = "")
+all.SL.tables <- lapply(all.SL.links, read.all.tables)
+SL.years <- c(1946:1970, 1972:2019)
+SL.years <- as.data.frame(SL.years)
+
+SL.standings <- lapply(all.SL.tables, function(x) x[[1]])
+for(i in 1:70){
+  SL.fielding1[[i]] <- amer.assoc.yr(SL.fielding1[[i]], SL.years[i,])
+}
+SL.standings <- bind_rows(SL.standings)
+SL.standings <- SL.standings %>% filter(W!="W")
+
+SL.fielding2[[1]] <- amer.assoc.yr(SL.fielding2[[1]], SL.years[71,])
+SL.fielding2[[2]] <- amer.assoc.yr(SL.fielding2[[2]], SL.years[72,])
+SL.fielding2[[3]] <- amer.assoc.yr(SL.fielding2[[3]], SL.years[73,])
+
+#Which tables we need differ by year:
+#If 3, batting is 2, pitching 3, no fielding
+#If 4, batting is 2, pitching 3, fielding 4
+#First 5: batting is 4, pitching 5, no fielding
+#Second 5: batting is 3, pitching 4, fielding 5
+#If 6, batting is 4, pitching 5, fielding 6
+
+batting.SL1 <- function(x){
+  ifelse(length(x)==6 | length(x)==5, return(x[[4]]), return(x[[2]]))
+}
+
+batting.SL2 <- function(x){
+  ifelse(length(x)==6, return(x[[4]]),
+         ifelse(length(x)==5, return(x[[3]]), return(x[[2]])))
+}
+
+SL.batting1 <- lapply(all.SL.tables[1:70], batting.SL1)
+SL.batting2 <- lapply(all.SL.tables[71:73], batting.SL2)
+SL.batting1 <- lapply(SL.batting1, remove.eastern)
+SL.batting2 <- lapply(SL.batting2, remove.eastern)
+SL.batting1 <- bind_rows(SL.batting1)
+SL.batting2 <- bind_rows(SL.batting2)
+SL.batting <- bind_rows(SL.batting1, SL.batting2)
+
+pitching.SL1 <- function(x){
+  ifelse(length(x)==6 | length(x)==5, return(x[[5]]), return(x[[3]]))
+}
+
+pitching.SL2 <- function(x){
+  ifelse(length(x)==6, return(x[[5]]),
+         ifelse(length(x)==5, return(x[[4]]), return(x[[3]])))
+}
+
+SL.pitching1 <- lapply(all.SL.tables[1:70], pitching.SL1)
+SL.pitching2 <- lapply(all.SL.tables[71:73], pitching.SL2)
+SL.pitching1 <- lapply(SL.pitching1, remove.eastern)
+SL.pitching2 <- lapply(SL.pitching2, remove.eastern)
+SL.pitching1 <- bind_rows(SL.pitching1)
+SL.pitching2 <- bind_rows(SL.pitching2)
+SL.pitching <- bind_rows(SL.pitching1, SL.pitching2)
+
+#If 3, batting is 2, pitching 3, no fielding
+#If 4, batting is 2, pitching 3, fielding 4
+#First 5: batting is 4, pitching 5, no fielding
+#Second 5: batting is 3, pitching 4, fielding 5
+#If 6, batting is 4, pitching 5, fielding 6
+
+fielding.SL1 <- function(x){
+  ifelse(length(x)==6, return(x[[6]]),
+         ifelse(length(x)==5 | length(x)==3, return(data.frame(matrix(ncol=1, nrow=1))),
+                return(x[[4]])))
+}
+
+fielding.SL2 <- function(x){
+  ifelse(length(x)==6, return(x[[6]]),
+         ifelse(length(x)==5, return(x[[5]]),
+                return(x[[4]])))
+}
+
+SL.fielding1 <- lapply(all.SL.tables[1:70], fielding.SL1)
+SL.fielding2 <- lapply(all.SL.tables[71:73], fielding.SL2)
+SL.fielding1 <- lapply(SL.fielding1, remove.eastern)
+SL.fielding2 <- lapply(SL.fielding2, remove.eastern)
+SL.fielding1 <- bind_rows(SL.fielding1)
+SL.fielding2 <- bind_rows(SL.fielding2)
+SL.fielding <- bind_rows(SL.fielding1, SL.fielding2)
+SL.fielding <- SL.fielding %>% filter(!is.na(Tm))
+SL.fielding <- SL.fielding[-c(16,20)]
+SL.fielding$PO...5 <- ifelse(is.na(SL.fielding$PO...5), 0, SL.fielding$PO...5)
+SL.fielding$PO...5 <- as.numeric(SL.fielding$PO...5)
+SL.fielding$PO...6 <- ifelse(is.na(SL.fielding$PO...6), 0, SL.fielding$PO...6)
+SL.fielding$PO...6 <- as.numeric(SL.fielding$PO...6)
+SL.fielding$PO <- SL.fielding$PO...5 + SL.fielding$PO...6
+SL.fielding <- SL.fielding[-c(5,6,18)]
+SL.fielding <- SL.fielding[-c(3,4)]
+
+SL <- full_join(SL.standings, SL.batting, by = c("Tm", "Year"))
+SL <- SL[-c(9)]
+SL <- full_join(SL, SL.pitching, by = c("Tm", "Year"))
+SL <- SL[-c(37:39, 42)]
+SL <- SL[-c(34)]
+SL <- full_join(SL, SL.fielding, by = c("Tm", "Year"))
+colnames(SL)[[2]] <- "Aff"
+colnames(SL)[[3]] <- "W"
+colnames(SL)[[4]] <- "L"
+colnames(SL)[[6]] <- "W-L%"
+colnames(SL)[[11]] <- "G"
+SL$W <- ifelse(SL$W==0, NA, SL$W)
+SL$L <- ifelse(SL$L==0, NA, SL$L)
+
+write.xlsx(SL, file = "SL.xlsx")
+
+SL
+```
+
+```{r}
+##Texas League
+
+all.TL.links <- lapply(all.league.links, spec.links, name="Texas League")
+all.TL.links <- bind_rows(all.TL.links)
+all.TL.links <- paste(urlbase2, all.TL.links$V1, sep = "")
+all.TL.tables <- lapply(all.TL.links, read.all.tables)
+TL.years <- c(1946:1970, 1972:2019)
+TL.years <- as.data.frame(TL.years)
+TL.standings <- lapply(all.TL.tables, function(x) x[[1]])
+for(i in 1:73){
+  TL.fielding[[i]] <- amer.assoc.yr(TL.fielding[[i]], TL.years[i,])
+}
+TL.standings <- bind_rows(TL.standings)
+TL.standings <- TL.standings %>% filter(W!="W")
+
+#If 3: batting 2, pitching 3, no fielding
+#If 4: batting 2, pitching 3, fielding 4
+#If 5: batting 4, pitching 5, no fielding
+#If 6: batting 4, pitching 5, fielding 6
+##Same as sa, use sa functions
+
+TL.batting <- lapply(all.TL.tables, batting.sa)
+TL.batting <- lapply(TL.batting, remove.eastern)
+TL.batting <- bind_rows(TL.batting)
+
+TL.pitching <- lapply(all.TL.tables, pitching.sa)
+TL.pitching <- lapply(TL.pitching, remove.eastern)
+TL.pitching <- bind_rows(TL.pitching)
+
+TL.fielding <- lapply(all.TL.tables, fielding.sa)
+TL.fielding <- lapply(TL.fielding, remove.eastern)
+TL.fielding <- bind_rows(TL.fielding)
+TL.fielding <- TL.fielding %>% filter(!is.na(TL.fielding$Tm))
+TL.fielding <- TL.fielding[-c(16)]
+colnames(TL.fielding)[[6]] <- "PO"
+
+TL <- full_join(TL.standings, TL.batting, by = c("Tm", "Year"))
+TL <- TL[-c(9)]
+TL <- full_join(TL, TL.pitching, by = c("Tm", "Year"))
+TL <- TL[-c(34, 37:39, 42)]
+TL <- full_join(TL, TL.fielding, by = c("Tm", "Year"))
+TL <- TL[-c(61:63)]
+colnames(TL)[[2]] <- "Aff"
+colnames(TL)[[3]] <- "W"
+colnames(TL)[[4]] <- "L"
+colnames(TL)[[6]] <- "W-L%"
+colnames(TL)[[11]] <- "G"
+TL$W <- ifelse(TL$W==0, NA, TL$W)
+TL$L <- ifelse(TL$L==0, NA, TL$L)
+
+write.xlsx(TL, file = "TL.xlsx")
+```
+
+```{r}
+##Dixie Association
+DA.link <- lapply(all.league.links, spec.links, name="Dixie Association")
+DA.link <- bind_rows(DA.link)
+DA.link <- paste(urlbase2, DA.link$V1, sep = "")
+DA.tables <- lapply(DA.link, read.all.tables)
+DA.standings <- DA.tables[[1]][[1]]
+DA.standings <- DA.standings %>% filter(W!="W")
+colnames(DA.standings)[[1]] <- "Tm"
+
+DA.batting <- DA.tables[[1]][[2]]
+colnames(DA.batting)[[1]] <- "Tm"
+DA.pitching <- DA.tables[[1]][[3]]
+colnames(DA.pitching)[[1]] <- "Tm"
+
+DA.fielding <- DA.tables[[1]][[4]]
+DA.fielding <- DA.fielding[-c(15)]
+colnames(DA.fielding)[[1]] <- "Tm"
+
+DA <- full_join(DA.standings, DA.batting, by = "Tm")
+DA <- DA[-c(7)]
+DA <- full_join(DA, DA.pitching, by = "Tm")
+DA <- DA[-c(32, 35:37, 40)]
+DA <- full_join(DA, DA.fielding, by = "Tm")
+DA <- DA[-c(59:61)]
+colnames(DA)[[2]] <- "Aff"
+colnames(DA)[[3]] <- "W"
+colnames(DA)[[4]] <- "L"
+colnames(DA)[[5]] <- "W-L%"
+colnames(DA)[[9]] <- "G"
+DA$Year <- 1971
+
+write.xlsx(DA, file = "DA.xlsx")
+```
+
+```{r}
+##Eastern League
+
+all.EL.links <- lapply(all.league.links, spec.links, name="Eastern League")
+all.EL.links <- bind_rows(all.EL.links)
+all.EL.links <- paste(urlbase2, all.EL.links$V1, sep = "")
+all.EL.tables <- lapply(all.EL.links, read.all.tables)
+EL.years <- c(1946:2019)
+EL.years <- as.data.frame(EL.years)
+EL.standings <- lapply(all.EL.tables, function(x) x[[1]])
+for(i in 1:74){
+  EL.fielding[[i]] <- amer.assoc.yr(EL.fielding[[i]], EL.years[i,])
+}
+EL.standings <- bind_rows(EL.standings)
+EL.standings <- EL.standings %>% filter(W!="W")
+EL.standings$W <- ifelse(EL.standings$W=="", NA, EL.standings$W)
+EL.standings$L <- ifelse(EL.standings$L=="", NA, EL.standings$L)
+EL.standings$`W-L%` <- ifelse(EL.standings$`W-L%`=="", NA, EL.standings$`W-L%`)
+
+#If 3: batting 2, pitching 3, no fielding
+#If 4: batting 2, pitching 3, fielding 4
+#If 5: batting 4, pitching 5, no fielding
+#If 6: batting 4, pitching 5, fielding 6
+##Same as sa, use sa functions
+
+batting.el <- function(x){
+  ifelse(length(x)==6, return(x[[4]]), return(x[[2]]))
+}
+
+pitching.el <- function(x){
+  ifelse(length(x)==6, return(x[[5]]), return(x[[3]]))
+}
+
+fielding.el <- function(x){
+  ifelse(length(x)==6, return(x[[6]]),
+         ifelse(length(x)==4, return(x[[4]]),
+                return(data.frame(matrix(ncol=1, nrow=1)))))
+}
+
+EL.batting <- lapply(all.EL.tables, batting.el)
+EL.batting <- lapply(EL.batting, remove.eastern)
+EL.batting <- bind_rows(EL.batting)
+
+EL.pitching <- lapply(all.EL.tables, pitching.el)
+EL.pitching <- lapply(EL.pitching, remove.eastern)
+EL.pitching <- bind_rows(EL.pitching)
+
+EL.fielding <- lapply(all.EL.tables, fielding.el)
+EL.fielding <- lapply(EL.fielding, remove.eastern)
+EL.fielding <- bind_rows(EL.fielding)
+EL.fielding <- EL.fielding %>% filter(!is.na(EL.fielding$Tm))
+EL.fielding <- EL.fielding[-c(15)]
+colnames(EL.fielding)[[5]] <- "PO"
+
+EL <- full_join(EL.standings, EL.batting, by = c("Tm", "Year"))
+EL <- EL[-c(9)]
+EL <- full_join(EL, EL.pitching, by = c("Tm", "Year"))
+EL$W.x <- ifelse(is.na(EL$W.x), EL$W.y, EL$W.x)
+EL$L.x <- ifelse(is.na(EL$L.x), EL$L.y, EL$L.x)
+EL$`W-L%.x` <- ifelse(is.na(EL$`W-L%.x`), EL$`W-L%.y`, EL$`W-L%.x`)
+EL <- EL[-c(34, 37:39, 42)]
+EL <- full_join(EL, EL.fielding, by = c("Tm", "Year"))
+EL <- EL[-c(61:63)]
+colnames(EL)[[2]] <- "Aff"
+colnames(EL)[[3]] <- "W"
+colnames(EL)[[4]] <- "L"
+colnames(EL)[[6]] <- "W-L%"
+colnames(EL)[[11]] <- "G"
+EL$W <- ifelse(EL$W==0, NA, EL$W)
+EL$L <- ifelse(EL$L==0, NA, EL$L)
+
+write.xlsx(EL, file = "EL.xlsx")
+
+EL
+```
+
+
+```{r}
+##Comparing the number of MLB teams in the league each year to the number of affiliated minor league teams at each level (AA, AAA) each year; at what point is there a 1:1 ratio with MLB teams and the number of affiliated teams in AA? AAA?
+
+urlbase <- "https://www.baseball-reference.com/register/affiliate.cgi?year="
+
+urls <- paste(urlbase, 1946:2019, sep = "")
+
+read.affiliates <- function (url){
+  d <- as.data.frame(html_table(read_html(url)))
+  d$TotAff <- stri_match_first_regex(d$Franchise, "[[:digit:]]+")
+  d$AAAaff <- ifelse(d$AAA=="", 0, str_count(d$AAA, ",") + 1)
+  d$AAaff <- ifelse(d$AA=="", 0, str_count(d$AA, ",") + 1)
+  return(d)
+}
+
+allyears <- lapply(urls, read.affiliates)
+
+NumAAAaff <- function(df){
+  return(as.data.frame(table(df[["AAAaff"]])))
+}
+
+AAAaffs <- list()
+
+for(i in 1:74){
+  AAAaffs[[i]] <- NumAAAaff(allyears[[i]])
+}
+
+ZeroAAAaff <- list()
+
+for(i in 1:74){
+  ZeroAAAaff[[i]] <- filter(AAAaffs[[i]], Var1==0)
+}
+
+ZeroAAAaff_final <- list()
+
+for(i in 1:74){
+  ifelse(nrow(ZeroAAAaff[[i]])==1, ZeroAAAaff_final[[i]] <- ZeroAAAaff[[i]][[2]],
+         ZeroAAAaff_final[[i]] <- 0)
+}
+
+ZeroAAAaff_final <- as.data.frame(t(as.data.frame(ZeroAAAaff_final)))
+
+OneAAAaff <- list()
+
+for(i in 1:74){
+  OneAAAaff[[i]] <- filter(AAAaffs[[i]], Var1==1)
+}
+
+OneAAAaff_final <- list()
+
+for(i in 1:74){
+  OneAAAaff_final[[i]] <- OneAAAaff[[i]][[2]]
+}
+
+OneAAAaff_final <- as.data.frame(t(as.data.frame(OneAAAaff_final)))
+
+TwoAAAaff <- list()
+
+for(i in 1:74){
+  TwoAAAaff[[i]] <- filter(AAAaffs[[i]], Var1==2)
+}
+
+TwoAAAaff_final <- list()
+
+for(i in 1:74){
+  ifelse(nrow(TwoAAAaff[[i]])==1, TwoAAAaff_final[[i]] <- TwoAAAaff[[i]][[2]],
+         TwoAAAaff_final[[i]] <- 0)
+}
+
+TwoAAAaff_final <- as.data.frame(t(as.data.frame(TwoAAAaff_final)))
+
+ThreeAAAaff <- list()
+
+for(i in 1:74){
+  ThreeAAAaff[[i]] <- filter(AAAaffs[[i]], Var1==3)
+}
+
+ThreeAAAaff_final <- list()
+
+for(i in 1:74){
+  ifelse(nrow(ThreeAAAaff[[i]])==1, ThreeAAAaff_final[[i]] <- ThreeAAAaff[[i]][[2]],
+         ThreeAAAaff_final[[i]] <- 0)
+}
+
+ThreeAAAaff_final <- as.data.frame(t(as.data.frame(ThreeAAAaff_final)))
+
+NumAAAaffs <- bind_cols(ZeroAAAaff_final, OneAAAaff_final)
+NumAAAaffs <- bind_cols(NumAAAaffs, TwoAAAaff_final)
+NumAAAaffs <- bind_cols(NumAAAaffs, ThreeAAAaff_final)
+colnames(NumAAAaffs) <- c("Zero", "One", "Two", "Three")
+NumAAAaffs$Year <- c(1946:2019)
+NumAAAaffs <- NumAAAaffs[c(5,1,2,3,4)]
+
+full_mlb <- full_mlb[-1,]
+
+NumAAAaffs <- full_join(NumAAAaffs, full_mlb, by = "Year")
+NumAAAaffs
+
+write.csv(NumAAAaffs, file = "AAAperTeam.csv")
+```
+
+```{r}
+ggplot() + geom_line(data = NumAAAaffs, aes(x = Year, y = NumTmsMLB, color = "Total MLB Teams"), size = 1.25) + geom_line(data = NumAAAaffs, aes(x = Year, y = Zero, color = "Teams with Zero Affiliates"), size = 1.25) + geom_line(data = NumAAAaffs, aes(x = Year, y = One, color = "Teams with One Affiliate"), size = 1.25) + geom_line(data = NumAAAaffs, aes(x = Year, y = Two, color = "Teams with Two Affiliates"), size = 1.25) + geom_line(data = NumAAAaffs, aes(x = Year, y = Three, color = "Teams with Three Affiliates"), size = 1.25) + theme_bw() + theme_stata(scheme = "s1mono") + theme(axis.title.x = element_text(size=15), axis.title.y = element_text(size=15), axis.text = element_text(size=15), axis.line = element_line(size = 0.3), legend.position = c(0.8, 0.3), legend.text = element_text(size=15), legend.title = element_text(size=15), plot.title = element_text(hjust = 0.5, size=25), legend.key.size = unit(1, "line"), panel.background = element_blank()) + scale_x_continuous(breaks = seq(1946, 2019, 5), expand = c(0,0)) + scale_y_continuous(breaks = seq(0, 40, 5), expand = c(0, 0), limits = c(0, 40)) + scale_color_manual(breaks = c("Total MLB Teams", "Teams with Zero Affiliates", "Teams with One Affiliate", "Teams with Two Affiliates", "Teams with Three Affiliates"), values = c("Total MLB Teams" = "red",
+  "Teams with Zero Affiliates" = "blue", "Teams with One Affiliate" = "darkgreen", "Teams with Two Affiliates" = "yellow", "Teams with Three Affiliates" = "orange")) + labs(color = "Teams") + ylab("Number of Teams")
+
+ggsave("AAAaffiliates.jpg", width = 10, height = 5)
+```
+
+```{r}
+##AA
+
+NumAAaff <- function(df){
+  return(as.data.frame(table(df[["AAaff"]])))
+}
+
+AAaffs <- list()
+
+for(i in 1:74){
+  AAaffs[[i]] <- NumAAaff(allyears[[i]])
+}
+
+ZeroAAaff <- list()
+
+for(i in 1:74){
+  ZeroAAaff[[i]] <- filter(AAaffs[[i]], Var1==0)
+}
+
+ZeroAAaff_final <- list()
+
+for(i in 1:74){
+  ifelse(nrow(ZeroAAaff[[i]])==1, ZeroAAaff_final[[i]] <- ZeroAAaff[[i]][[2]],
+         ZeroAAaff_final[[i]] <- 0)
+}
+
+ZeroAAaff_final <- as.data.frame(t(as.data.frame(ZeroAAaff_final)))
+
+OneAAaff <- list()
+
+for(i in 1:74){
+  OneAAaff[[i]] <- filter(AAaffs[[i]], Var1==1)
+}
+
+OneAAaff_final <- list()
+
+for(i in 1:74){
+  OneAAaff_final[[i]] <- OneAAaff[[i]][[2]]
+}
+
+OneAAaff_final <- as.data.frame(t(as.data.frame(OneAAaff_final)))
+
+TwoAAaff <- list()
+
+for(i in 1:74){
+  TwoAAaff[[i]] <- filter(AAaffs[[i]], Var1==2)
+}
+
+TwoAAaff_final <- list()
+
+for(i in 1:74){
+  ifelse(nrow(TwoAAaff[[i]])==1, TwoAAaff_final[[i]] <- TwoAAaff[[i]][[2]],
+         TwoAAaff_final[[i]] <- 0)
+}
+
+TwoAAaff_final <- as.data.frame(t(as.data.frame(TwoAAaff_final)))
+
+ThreeAAaff <- list()
+
+for(i in 1:74){
+  ThreeAAaff[[i]] <- filter(AAaffs[[i]], Var1==3)
+}
+
+ThreeAAaff_final <- list()
+
+for(i in 1:74){
+  ifelse(nrow(ThreeAAaff[[i]])==1, ThreeAAaff_final[[i]] <- ThreeAAaff[[i]][[2]],
+         ThreeAAaff_final[[i]] <- 0)
+}
+
+ThreeAAaff_final <- as.data.frame(t(as.data.frame(ThreeAAaff_final)))
+
+NumAAaffs <- bind_cols(ZeroAAaff_final, OneAAaff_final)
+NumAAaffs <- bind_cols(NumAAaffs, TwoAAaff_final)
+NumAAaffs <- bind_cols(NumAAaffs, ThreeAAaff_final)
+colnames(NumAAaffs) <- c("Zero", "One", "Two", "Three")
+NumAAaffs$Year <- c(1946:2019)
+NumAAaffs <- NumAAaffs[c(5,1,2,3,4)]
+
+NumAAaffs <- full_join(NumAAaffs, full_mlb, by = "Year")
+NumAAaffs <- NumAAaffs[-c(5)]
+NumAAaffs
+
+write.csv(NumAAaffs, file = "AAperTeam.csv")
+```
+
+```{r}
+ggplot() + geom_line(data = NumAAaffs, aes(x = Year, y = NumTmsMLB, color = "Total MLB Teams"), size = 1.25) + geom_line(data = NumAAaffs, aes(x = Year, y = Zero, color = "Teams with Zero Affiliates"), size = 1.25) + geom_line(data = NumAAaffs, aes(x = Year, y = One, color = "Teams with One Affiliate"), size = 1.25) + geom_line(data = NumAAaffs, aes(x = Year, y = Two, color = "Teams with Two Affiliates"), size = 1.25) + theme_bw() + theme_stata(scheme = "s1mono") + theme(axis.title.x = element_text(size=15), axis.title.y = element_text(size=15), axis.text = element_text(size=15), axis.line = element_line(size = 0.3), legend.position = c(0.8, 0.3), legend.text = element_text(size=15), legend.title = element_text(size=15), plot.title = element_text(hjust = 0.5, size=25), legend.key.size = unit(1, "line"), panel.background = element_blank()) + scale_x_continuous(breaks = seq(1946, 2019, 5), expand = c(0,0)) + scale_y_continuous(breaks = seq(0, 40, 5), expand = c(0, 0), limits = c(0, 40)) + scale_color_manual(breaks = c("Total MLB Teams", "Teams with Zero Affiliates", "Teams with One Affiliate", "Teams with Two Affiliates"), values = c("Total MLB Teams" = "red",
+  "Teams with Zero Affiliates" = "blue", "Teams with One Affiliate" = "darkgreen", "Teams with Two Affiliates" = "yellow")) + labs(color = "Teams") + ylab("Number of Teams")
+
+ggsave("AAaffiliates.jpg", width = 10, height = 5)
+```
+
